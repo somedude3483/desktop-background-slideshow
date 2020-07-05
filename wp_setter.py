@@ -82,23 +82,24 @@ class _MainFunctions:
 
         for i in range(len(resp_json(0))):
             yield resp_json(i)
-
-    def _random_image():
-        print(_details)
+            
+    @classmethod
+    def _random_image(class_):
         """Pick a random images from the get_links list"""
         return random.choice(
             list(
-                _MainFunctions._get_links(
+                class_._get_links(
                     link=_details["link"], client_id=_details["client_id"],
                 )
             )
         )
-
-    def _make_file():
+    
+    @classmethod
+    def _make_file(class_):
         """Create image file"""
         with open("wallpaper.bmp", "wb+") as wp_file:
             try:
-                image = requests.get(_MainFunctions._random_image())
+                image = requests.get(class_._random_image())
             except MissingSchema as error:
                 raise APIError(_details, ["link", "client_id"], None, error) from None
             wp_file.write(image.content)
@@ -107,7 +108,6 @@ class _MainFunctions:
 def set_new_background(*, minutes: float = 0, repeat: bool = False):
     """set_new_background(*, minutes: float=0, repeat: bool=False)
        Set a random image from the imgur link you specified as your background."""
-    print(minutes, repeat, minutes != 0, not repeat)
     if minutes != 0 and not repeat:
         warnings.warn(
             "Next time if you want to enable repeat, "
