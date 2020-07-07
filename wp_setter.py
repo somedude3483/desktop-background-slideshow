@@ -121,6 +121,7 @@ class _MainFunctions:
 
 
 def linkify(link: str = None):
+    """Converts imgur link to api link"""
     if not link.endswith(".json"):
         return f"https://api.imgur.com/3/{'/'.join(link.split('/')[-2:])}.json"
     return f"https://api.imgur.com/3/{'/'.join(link.split('/')[-2:])}"
