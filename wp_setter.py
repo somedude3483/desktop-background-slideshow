@@ -1,8 +1,6 @@
 """wp_setter.py
-
 Uses Imgur's API Client ID key and a link to get a random image from a specified gallery
 and sets it as your desktop background.
-
 This script only works for Windows machines."""
 
 import requests
@@ -30,13 +28,9 @@ class WPSystemError(WallpaperError):
         self.real_error = real_error
 
     def __str__(self):
-        if self.name == "Linux":
+        if self.name in ["Linux", "Darwin"]:
             return repr(
-                f"{self.name} is not a Windows version. Linux is not supported by the script. Error raised from {self.real_error}"
-            )
-        elif self.name == "Darwin":
-            return repr(
-                f"{self.name} is not a Windows version. MacOS is not supported by the script. Error raised from {self.real_error}"
+                f"{self.name} is not a Windows version. {self.name} is not supported by the script. Error raised from {self.real_error}"
             )
         return repr(f"Unrecognized system with an RE of {self.real_error}")
 
@@ -64,6 +58,24 @@ class APIError(WallpaperError):
         raise WallPaperError("Unknown error")
 
 
+class LinkError(APIError):
+    """LinkError
+    Problem parsing the link."""
+
+    def __init__(self, link, real_error):
+        self.link = link
+        self.real_error = real_error
+
+    def __str__(self):
+        if self.link != linkify(self.link):
+            return (
+                f"{self.link} is not a valid Imgur API link. " \
+                f"Read on built in function help(wp_setter.linkify) " \
+                f"Raised from {self.real_error}"
+            )
+        return WallpaperError("Unknown error")
+
+
 def set_details(*, sd_link, sd_client_id):
     """set_details(*, sd_link, sd_client_id)
     This script uses imgur's API to get images off of their site.
@@ -78,11 +90,14 @@ class _MainFunctions:
         response = requests.get(
             link, headers={"Authorization": f"Client-ID {client_id}"}
         )
-        resp_json = lambda x: response.json()["data"]["images"][x]["link"]
+        try:
+            resp_json = lambda x: response.json()["data"]["images"][x]["link"]
 
-        for i in range(len(resp_json(0))):
-            yield resp_json(i)
-            
+            for i in range(len(resp_json(0))):
+                yield resp_json(i)
+        except KeyError as error:
+            raise LinkError(_details["link"], error) from None
+
     @classmethod
     def _random_image(class_):
         """Pick a random images from the get_links list"""
@@ -93,7 +108,7 @@ class _MainFunctions:
                 )
             )
         )
-    
+
     @classmethod
     def _make_file(class_):
         """Create image file"""
@@ -103,6 +118,12 @@ class _MainFunctions:
             except MissingSchema as error:
                 raise APIError(_details, ["link", "client_id"], None, error) from None
             wp_file.write(image.content)
+
+
+def linkify(link: str = None):
+    if not link.endswith(".json"):
+        return f"https://api.imgur.com/3/{'/'.join(link.split('/')[-2:])}.json"
+    return f"https://api.imgur.com/3/{'/'.join(link.split('/')[-2:])}"
 
 
 def set_new_background(*, minutes: float = 0, repeat: bool = False):
