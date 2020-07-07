@@ -8,6 +8,8 @@ import warnings
 import platform
 import random
 import ctypes
+import shutil
+import glob
 import time
 import sys
 import os
@@ -16,6 +18,7 @@ from requests.exceptions import MissingSchema
 if not sys.warnoptions:
     warnings.simplefilter("default")
 _details = {"link": None, "client_id": None}
+_cache_path = {"CP": None}
 
 
 class WallpaperError(Exception):
@@ -55,7 +58,26 @@ class APIError(WallpaperError):
                     ]
                 )
             )
-        raise WallPaperError("Unknown error")
+        raise WallpaperError("Unknown error")
+
+
+class CacheError(WallpaperError):
+    """CacheError
+    Cache was not initialized"""
+
+    def __init__(self, core_var, _slice, value, real_error):
+        self.current_state = [core_var, _slice, value]
+        self.real_error = real_error
+        print(self.current_state, self.real_error)
+
+    def __str__(self):
+        if self.current_state[0][self.current_state[1]] is self.current_state[2]:
+            return repr(
+                f"Cache was not initialized on background call. "
+                "Initialize the cache first by exeucting wp_setter.cache(filepath), "
+                "and then call the function. Called from {self.real_error}"
+            )
+        raise WallpaperError("Unknown Error")
 
 
 class LinkError(APIError):
@@ -69,8 +91,8 @@ class LinkError(APIError):
     def __str__(self):
         if self.link != linkify(self.link):
             return (
-                f"{self.link} is not a valid Imgur API link. " \
-                f"Read on built in function help(wp_setter.linkify) " \
+                f"{self.link} is not a valid Imgur API link. "
+                f"Read on built in function help(wp_setter.linkify) "
                 f"Raised from {self.real_error}"
             )
         return WallpaperError("Unknown error")
@@ -121,16 +143,51 @@ class _MainFunctions:
 
 
 def linkify(link: str = None):
-    """Converts imgur link to api link"""
     if not link.endswith(".json"):
         return f"https://api.imgur.com/3/{'/'.join(link.split('/')[-2:])}.json"
     return f"https://api.imgur.com/3/{'/'.join(link.split('/')[-2:])}"
 
 
-def set_new_background(*, minutes: float = 0, repeat: bool = False):
+def cache(*, clear: bool = False, limit: int = 100, filepath):
+    if _details["client_id"] is not None:
+        if clear:
+            os.remove(filepath)
+            return
+        if not os.path.isdir(filepath):
+            os.mkdir(filepath)
+
+            for index, item in enumerate(
+                _MainFunctions._get_links(
+                    link=_details["link"], client_id=_details["client_id"]
+                )
+            ):
+                space = sum(
+                    [
+                        os.stat(item).st_size
+                        for item in glob.glob(os.path.join(filepath, "*.bmp"))
+                    ]
+                )
+                if space > limit:
+                    return
+                resp = requests.get(item)
+                with open(
+                    os.path.join(filepath, f"wallpaper{index}.bmp"), "wb+"
+                ) as file:
+                    file.write(resp.content)
+        _cache_path["CP"] = glob.glob(os.path.join(filepath, "*.bmp"))
+        return
+    if clear:
+        shutil.rmtree(filepath)
+        return
+    raise APIError(_details, list(_details.keys()), None, None)
+
+
+def set_new_background(
+    *, minutes: float = 10, repeat: bool = False, from_cache: bool = False
+):
     """set_new_background(*, minutes: float=0, repeat: bool=False)
        Set a random image from the imgur link you specified as your background."""
-    if minutes != 0 and not repeat:
+    if minutes != 10 and not repeat:
         warnings.warn(
             "Next time if you want to enable repeat, "
             "call the function with repeat set as True. "
@@ -142,15 +199,31 @@ def set_new_background(*, minutes: float = 0, repeat: bool = False):
     try:
         if repeat:
             while True:
-                ctypes.windll.user32.SystemParametersInfoW(
-                    20, 0, os.path.join(os.getcwd(), "wallpaper.bmp"), 1
-                )
+                if from_cache:
+                    try:
+                        ctypes.windll.user32.SystemParametersInfoW(
+                            20, 0, random.choice(_cache_path["CP"]), 1
+                        )
+                    except TypeError as error:
+                        raise CacheError(_cache_path, "CP", None, error) from None
+                else:
+                    ctypes.windll.user32.SystemParametersInfoW(
+                        20, 0, os.path.join(os.getcwd(), "wallpaper.bmp"), 1
+                    )
                 time.sleep(minutes * 60)
                 _MainFunctions._make_file()
         else:
-            ctypes.windll.user32.SystemParametersInfoW(
-                20, 0, os.path.join(os.getcwd(), "wallpaper.bmp"), 1
-            )
+            if from_cache:
+                try:
+                    ctypes.windll.user32.SystemParametersInfoW(
+                        20, 0, random.choice(_cache_path["CP"]), 1
+                    )
+                except TypeError as error:
+                    raise CacheError(_cache_path, "CP", None, error) from None
+            else:
+                ctypes.windll.user32.SystemParametersInfoW(
+                    20, 0, os.path.join(os.getcwd(), "wallpaper.bmp"), 1
+                )
     except AttributeError as error:
         raise WPSystemError(platform.system(), error) from None
 
