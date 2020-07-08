@@ -3,6 +3,7 @@ Uses Imgur's API Client ID key and a link to get a random image from a specified
 and sets it as your desktop background.
 This script only works for Windows machines."""
 
+import threading
 import requests
 import warnings
 import platform
@@ -19,6 +20,8 @@ if not sys.warnoptions:
     warnings.simplefilter("default")
 _details = {"link": None, "client_id": None}
 _cache_path = {"CP": None}
+_running = [False]
+bg = None
 
 
 class WallpaperError(Exception):
@@ -141,6 +144,51 @@ class _MainFunctions:
                 raise APIError(_details, ["link", "client_id"], None, error) from None
             wp_file.write(image.content)
 
+    def _background(
+    minutes: float = 10, repeat: bool = False, from_cache: bool = False
+):
+        """set_new_background(*, minutes: float=0, repeat: bool=False)
+           Set a random image from the imgur link you specified as your background."""
+        if minutes != 10 and not repeat:
+            warnings.warn(
+                "Next time if you want to enable repeat, "
+                "call the function with repeat set as True. "
+                "set_new_background(minutes=minutes, repeat=True)",
+                DeprecationWarning,
+            )
+            repeat = True
+        _MainFunctions._make_file()
+        try:
+            if repeat:
+                while True:
+                    if from_cache:
+                        try:
+                            ctypes.windll.user32.SystemParametersInfoW(
+                                20, 0, random.choice(_cache_path["CP"]), 1
+                            )
+                        except TypeError as error:
+                            raise CacheError(_cache_path, "CP", None, error) from None
+                    else:
+                        ctypes.windll.user32.SystemParametersInfoW(
+                            20, 0, os.path.join(os.getcwd(), "wallpaper.bmp"), 1
+                        )
+                    time.sleep(minutes * 60)
+                    _MainFunctions._make_file()
+            else:
+                if from_cache:
+                    try:
+                        ctypes.windll.user32.SystemParametersInfoW(
+                            20, 0, random.choice(_cache_path["CP"]), 1
+                        )
+                    except TypeError as error:
+                        raise CacheError(_cache_path, "CP", None, error) from None
+                else:
+                    ctypes.windll.user32.SystemParametersInfoW(
+                        20, 0, os.path.join(os.getcwd(), "wallpaper.bmp"), 1
+                    )
+        except AttributeError as error:
+            raise WPSystemError(platform.system(), error) from None
+
 
 def linkify(link: str = None):
     if not link.endswith(".json"):
@@ -182,52 +230,13 @@ def cache(*, clear: bool = False, limit: int = 100, filepath):
     raise APIError(_details, list(_details.keys()), None, None)
 
 
-def set_new_background(
-    *, minutes: float = 10, repeat: bool = False, from_cache: bool = False
-):
-    """set_new_background(*, minutes: float=0, repeat: bool=False)
-       Set a random image from the imgur link you specified as your background."""
-    if minutes != 10 and not repeat:
-        warnings.warn(
-            "Next time if you want to enable repeat, "
-            "call the function with repeat set as True. "
-            "set_new_background(minutes=minutes, repeat=True)",
-            DeprecationWarning,
-        )
-        repeat = True
-    _MainFunctions._make_file()
-    try:
-        if repeat:
-            while True:
-                if from_cache:
-                    try:
-                        ctypes.windll.user32.SystemParametersInfoW(
-                            20, 0, random.choice(_cache_path["CP"]), 1
-                        )
-                    except TypeError as error:
-                        raise CacheError(_cache_path, "CP", None, error) from None
-                else:
-                    ctypes.windll.user32.SystemParametersInfoW(
-                        20, 0, os.path.join(os.getcwd(), "wallpaper.bmp"), 1
-                    )
-                time.sleep(minutes * 60)
-                _MainFunctions._make_file()
-        else:
-            if from_cache:
-                try:
-                    ctypes.windll.user32.SystemParametersInfoW(
-                        20, 0, random.choice(_cache_path["CP"]), 1
-                    )
-                except TypeError as error:
-                    raise CacheError(_cache_path, "CP", None, error) from None
-            else:
-                ctypes.windll.user32.SystemParametersInfoW(
-                    20, 0, os.path.join(os.getcwd(), "wallpaper.bmp"), 1
-                )
-    except AttributeError as error:
-        raise WPSystemError(platform.system(), error) from None
-
-
+def set_new_background(minutes: float = 10, repeat: bool = False, from_cache: bool = False):
+    if len(threading.enumerate()) < 3:
+        bg = threading.Thread(name="bg", target=_MainFunctions._background, args=(minutes, repeat, from_cache))
+        bg.start()
+        return
+    return False
+    
 if __name__ == "__main__":
     if _details["link"] is None:
         raise APIError(_details, list(_details.keys()), None, None)
