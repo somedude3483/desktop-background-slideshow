@@ -21,7 +21,7 @@ if not sys.warnoptions:
 _details = {"link": None, "client_id": None}
 _cache_path = {"CP": None}
 _running = [False]
-bg = None
+_bg = None
 
 
 class WallpaperError(Exception):
@@ -78,7 +78,7 @@ class CacheError(WallpaperError):
             return repr(
                 f"Cache was not initialized on background call. "
                 "Initialize the cache first by exeucting wp_setter.cache(filepath), "
-                "and then call the function. Called from {self.real_error}"
+                f"and then call the function. Called from {self.real_error}"
             )
         raise WallpaperError("Unknown Error")
 
@@ -139,7 +139,8 @@ class _MainFunctions:
         """Create image file"""
         with open("wallpaper.bmp", "wb+") as wp_file:
             try:
-                image = requests.get(class_._random_image())
+                with requests.Session() as session:
+                    image = session.get(class_._random_image())
             except MissingSchema as error:
                 raise APIError(_details, ["link", "client_id"], None, error) from None
             wp_file.write(image.content)
@@ -196,10 +197,10 @@ def linkify(link: str = None):
     return f"https://api.imgur.com/3/{'/'.join(link.split('/')[-2:])}"
 
 
-def cache(*, clear: bool = False, limit: int = 100, filepath):
+def cache(*, clear: bool = False, limit: int = 100_000_000, filepath):
     if _details["client_id"] is not None:
         if clear:
-            os.remove(filepath)
+            shutil.rmtree(filepath)
             return
         if not os.path.isdir(filepath):
             os.mkdir(filepath)
@@ -216,16 +217,13 @@ def cache(*, clear: bool = False, limit: int = 100, filepath):
                     ]
                 )
                 if space > limit:
+                    _cache_path["CP"] = glob.glob(os.path.join(filepath, "*.bmp"))
                     return
                 resp = requests.get(item)
                 with open(
                     os.path.join(filepath, f"wallpaper{index}.bmp"), "wb+"
                 ) as file:
                     file.write(resp.content)
-        _cache_path["CP"] = glob.glob(os.path.join(filepath, "*.bmp"))
-        return
-    if clear:
-        shutil.rmtree(filepath)
         return
     raise APIError(_details, list(_details.keys()), None, None)
 
