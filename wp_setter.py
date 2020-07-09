@@ -12,8 +12,10 @@ import ctypes
 import shutil
 import glob
 import time
+import json
 import sys
 import os
+import concurrent.futures
 from requests.exceptions import MissingSchema
 
 if not sys.warnoptions:
@@ -145,9 +147,7 @@ class _MainFunctions:
                 raise APIError(_details, ["link", "client_id"], None, error) from None
             wp_file.write(image.content)
 
-    def _background(
-    minutes: float = 10, repeat: bool = False, from_cache: bool = False
-):
+    def _background(minutes: float = 10, repeat: bool = False):
         """set_new_background(*, minutes: float=0, repeat: bool=False)
            Set a random image from the imgur link you specified as your background."""
         if minutes != 10 and not repeat:
@@ -162,33 +162,87 @@ class _MainFunctions:
         try:
             if repeat:
                 while True:
-                    if from_cache:
-                        try:
-                            ctypes.windll.user32.SystemParametersInfoW(
-                                20, 0, random.choice(_cache_path["CP"]), 1
-                            )
-                        except TypeError as error:
-                            raise CacheError(_cache_path, "CP", None, error) from None
-                    else:
-                        ctypes.windll.user32.SystemParametersInfoW(
-                            20, 0, os.path.join(os.getcwd(), "wallpaper.bmp"), 1
-                        )
-                    time.sleep(minutes * 60)
-                    _MainFunctions._make_file()
-            else:
-                if from_cache:
-                    try:
-                        ctypes.windll.user32.SystemParametersInfoW(
-                            20, 0, random.choice(_cache_path["CP"]), 1
-                        )
-                    except TypeError as error:
-                        raise CacheError(_cache_path, "CP", None, error) from None
-                else:
                     ctypes.windll.user32.SystemParametersInfoW(
                         20, 0, os.path.join(os.getcwd(), "wallpaper.bmp"), 1
                     )
+                    time.sleep(minutes * 60)
+                    _MainFunctions._make_file()
+            else:
+                ctypes.windll.user32.SystemParametersInfoW(
+                    20, 0, os.path.join(os.getcwd(), "wallpaper.bmp"), 1
+                )
         except AttributeError as error:
             raise WPSystemError(platform.system(), error) from None
+
+    def _offline_background(minutes, repeat):
+
+        with open("cache_path.json") as file:
+            _cache_path = json.load(file)
+        if minutes != 10 and not repeat:
+            warnings.warn(
+                "Next time if you want to enable repeat, "
+                "call the function with repeat set as True. "
+                "set_new_background(minutes=minutes, repeat=True)",
+                DeprecationWarning,
+            )
+            repeat = True
+        try:
+            if repeat:
+                while True:
+                    with open("cache_path.json") as file:
+                        ctypes.windll.user32.SystemParametersInfoW(
+                            20, 0, random.choice(json.load(file)), 1
+                        )
+                        time.sleep(minutes * 60)
+            else:
+                with open("cache_path.json") as file:
+                    ctypes.windll.user32.SystemParametersInfoW(
+                        20, 0, random.choice(json.load(file)), 1
+                    )
+        except AttributeError as error:
+            raise WPSystemError(platform.system(), error) from None
+
+    def _cache(filepath, limit, clear):
+        start = time.time()
+        if _details["client_id"] is not None:
+            if clear:
+                shutil.rmtree(filepath)
+                return
+            if not os.path.isdir(filepath):
+                os.mkdir(filepath)
+
+                for index, item in enumerate(
+                    _MainFunctions._get_links(
+                        link=_details["link"], client_id=_details["client_id"]
+                    )
+                ):
+                    space = sum(
+                        [
+                            os.stat(item).st_size
+                            for item in glob.glob(os.path.join(filepath, "*.bmp"))
+                        ]
+                    )
+                    if space > limit:
+                        _cache_path["CP"] = glob.glob(os.path.join(filepath, "*.bmp"))
+                        with open("cache_path.json", "w+") as file:
+                            json.dump(_cache_path["CP"], file)
+                        return
+                    resp = requests.get(item)
+                    with open(
+                        os.path.join(filepath, f"wallpaper{index}.bmp"), "wb+"
+                    ) as file:
+                        file.write(resp.content)
+            _cache_path["CP"] = glob.glob(os.path.join(filepath, "*.bmp"))
+            with open("cache_path.json", "w+") as file:
+                json.dump(_cache_path["CP"], file)
+            print(f"Finished in {round(time.time() - start, 3)}s")
+            return
+        raise APIError(_details, list(_details.keys()), None, None)
+
+
+def cache(*, filepath, limit: int = 100_000_000_000, clear: bool = False):
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        executor.map(_MainFunctions._cache, (filepath,), (limit,), (clear,))
 
 
 def linkify(link: str = None):
@@ -197,44 +251,25 @@ def linkify(link: str = None):
     return f"https://api.imgur.com/3/{'/'.join(link.split('/')[-2:])}"
 
 
-def cache(*, clear: bool = False, limit: int = 100_000_000, filepath):
-    if _details["client_id"] is not None:
-        if clear:
-            shutil.rmtree(filepath)
-            return
-        if not os.path.isdir(filepath):
-            os.mkdir(filepath)
-
-            for index, item in enumerate(
-                _MainFunctions._get_links(
-                    link=_details["link"], client_id=_details["client_id"]
-                )
-            ):
-                space = sum(
-                    [
-                        os.stat(item).st_size
-                        for item in glob.glob(os.path.join(filepath, "*.bmp"))
-                    ]
-                )
-                if space > limit:
-                    _cache_path["CP"] = glob.glob(os.path.join(filepath, "*.bmp"))
-                    return
-                resp = requests.get(item)
-                with open(
-                    os.path.join(filepath, f"wallpaper{index}.bmp"), "wb+"
-                ) as file:
-                    file.write(resp.content)
-        return
-    raise APIError(_details, list(_details.keys()), None, None)
-
-
-def set_new_background(minutes: float = 10, repeat: bool = False, from_cache: bool = False):
+def set_new_background(
+    minutes: float = 10, repeat: bool = False, from_cache: bool = False
+):
     if len(threading.enumerate()) < 3:
-        bg = threading.Thread(name="bg", target=_MainFunctions._background, args=(minutes, repeat, from_cache))
+        if not from_cache:
+            bg = threading.Thread(
+                name="bg", target=_MainFunctions._background, args=(minutes, repeat)
+            )
+            bg.start()
+            return
+        bg = threading.Thread(
+            name="offline_bg",
+            target=_MainFunctions._offline_background,
+            args=(minutes, repeat),
+        )
         bg.start()
-        return
     return False
-    
+
+
 if __name__ == "__main__":
     if _details["link"] is None:
         raise APIError(_details, list(_details.keys()), None, None)
