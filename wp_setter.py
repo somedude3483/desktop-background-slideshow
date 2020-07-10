@@ -3,6 +3,7 @@ Uses Imgur's API Client ID key and a link to get a random image from a specified
 and sets it as your desktop background.
 This script only works for Windows machines."""
 
+import concurrent.futures
 import threading
 import requests
 import warnings
@@ -15,8 +16,8 @@ import time
 import json
 import sys
 import os
-import concurrent.futures
 from requests.exceptions import MissingSchema
+from requests.exceptions import ConnectionError as ConnectionError_
 
 if not sys.warnoptions:
     warnings.simplefilter("default")
@@ -113,10 +114,14 @@ def set_details(*, sd_link, sd_client_id):
 
 class _MainFunctions:
     def _get_links(*, link, client_id):
-        """Get links from imgur Windows Spotlight gallery"""
-        response = requests.get(
-            link, headers={"Authorization": f"Client-ID {client_id}"}
-        )
+        """Get links from the imgur gallery"""
+        try:
+            response = requests.get(
+                link, headers={"Authorization": f"Client-ID {client_id}"}
+            )
+
+        except ConnectionError_ as error:
+            raise ConnectionError from None
         try:
             resp_json = lambda x: response.json()["data"]["images"][x]["link"]
 
@@ -141,13 +146,19 @@ class _MainFunctions:
         """Create image file"""
         with open("wallpaper.bmp", "wb+") as wp_file:
             try:
-                with requests.Session() as session:
-                    image = session.get(class_._random_image())
+                try:
+                    with requests.Session() as session:
+                        image = session.get(class_._random_image())
+                except ConnectionError_:
+                    raise ConnectionError from None
+        
             except MissingSchema as error:
                 raise APIError(_details, ["link", "client_id"], None, error) from None
             wp_file.write(image.content)
 
-    def _background(minutes: float = 10, repeat: bool = False):
+    def _background(
+    minutes: float = 10, repeat: bool = False
+):
         """set_new_background(*, minutes: float=0, repeat: bool=False)
            Set a random image from the imgur link you specified as your background."""
         if minutes != 10 and not repeat:
@@ -174,10 +185,13 @@ class _MainFunctions:
         except AttributeError as error:
             raise WPSystemError(platform.system(), error) from None
 
-    def _offline_background(minutes, repeat):
+    def _offline_background(
+        minutes, repeat
+        ):
 
         with open("cache_path.json") as file:
             _cache_path = json.load(file)
+
         if minutes != 10 and not repeat:
             warnings.warn(
                 "Next time if you want to enable repeat, "
@@ -186,6 +200,7 @@ class _MainFunctions:
                 DeprecationWarning,
             )
             repeat = True
+
         try:
             if repeat:
                 while True:
@@ -200,7 +215,8 @@ class _MainFunctions:
                         20, 0, random.choice(json.load(file)), 1
                     )
         except AttributeError as error:
-            raise WPSystemError(platform.system(), error) from None
+            raise WPSystemError(platform.system(), error) from None  
+        
 
     def _cache(filepath, limit, clear):
         start = time.time()
@@ -240,9 +256,10 @@ class _MainFunctions:
         raise APIError(_details, list(_details.keys()), None, None)
 
 
-def cache(*, filepath, limit: int = 100_000_000_000, clear: bool = False):
+def cache(*, filepath, limit: int=100_000_000_000, clear: bool=False):
     with concurrent.futures.ThreadPoolExecutor() as executor:
         executor.map(_MainFunctions._cache, (filepath,), (limit,), (clear,))
+    
 
 
 def linkify(link: str = None):
@@ -250,26 +267,16 @@ def linkify(link: str = None):
         return f"https://api.imgur.com/3/{'/'.join(link.split('/')[-2:])}.json"
     return f"https://api.imgur.com/3/{'/'.join(link.split('/')[-2:])}"
 
-
-def set_new_background(
-    minutes: float = 10, repeat: bool = False, from_cache: bool = False
-):
+def set_new_background(minutes: float=10, repeat: bool=False, from_cache: bool=False):
     if len(threading.enumerate()) < 3:
         if not from_cache:
-            bg = threading.Thread(
-                name="bg", target=_MainFunctions._background, args=(minutes, repeat)
-            )
+            bg = threading.Thread(name="bg", target=_MainFunctions._background, args=(minutes, repeat))
             bg.start()
             return
-        bg = threading.Thread(
-            name="offline_bg",
-            target=_MainFunctions._offline_background,
-            args=(minutes, repeat),
-        )
+        bg = threading.Thread(name="offline_bg", target=_MainFunctions._offline_background, args=(minutes, repeat))
         bg.start()
     return False
-
-
+    
 if __name__ == "__main__":
     if _details["link"] is None:
         raise APIError(_details, list(_details.keys()), None, None)
